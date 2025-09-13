@@ -1,0 +1,6 @@
+vosk
+pyaudio
+RPi.GPIO
+reportlab
+ctransformers
+Flask
