@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transcription Appliance v2.0</title>
+    <title>Transcription Appliance</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .drop-zone-over {
@@ -23,10 +23,16 @@
         <main class="space-y-8">
             <!-- File Upload Section -->
             <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md">
-                <h2 class="text-2xl font-semibold text-gray-700 mb-4">Upload Audio File</h2>
-                <div id="drop-zone" class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer transition-colors">
-                    <p class="text-gray-500">Drag & drop a <code class="bg-gray-200 p-1 rounded">.wav</code> or <code class="bg-gray-200 p-1 rounded">.m4a</code> file here, or click to select</p>
-                    <input type="file" id="file-input" class="hidden" accept=".wav,.m4a">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4">Create New Meeting</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <input type="text" id="meeting-name" placeholder="Meeting Name" class="p-2 border rounded">
+                    <input type="date" id="meeting-date" class="p-2 border rounded">
+                </div>
+                <div id="drop-zone" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer transition-colors">
+                    <p class="text-gray-500">
+                        Drag & drop an audio file (<code class="bg-gray-200 p-1 rounded">.wav</code>, <code class="bg-gray-200 p-1 rounded">.m4a</code>) here, or click to select.
+                    </p>
+                    <input type="file" id="file-input" class="hidden" accept=".wav,.m4a,.mp3,.ogg">
                 </div>
                 <div id="upload-status" class="mt-4 text-sm"></div>
             </section>
@@ -34,7 +40,7 @@
             <!-- Transcripts List Section -->
             <section id="transcripts-section" class="bg-white p-6 rounded-lg shadow-md">
                 <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-2xl font-semibold text-gray-700">Generated Transcripts</h2>
+                    <h2 class="text-2xl font-semibold text-gray-700">Meetings</h2>
                     <button id="refresh-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded transition-colors">
                         Refresh
                     </button>
@@ -55,6 +61,8 @@
             const refreshBtn = document.getElementById('refresh-btn');
             const dropZone = document.getElementById('drop-zone');
             const fileInput = document.getElementById('file-input');
+            const meetingNameInput = document.getElementById('meeting-name');
+            const meetingDateInput = document.getElementById('meeting-date');
             const uploadStatus = document.getElementById('upload-status');
             const wifiStatusEl = document.getElementById('wifi-status');
             const scanBtn = document.getElementById('scan-btn');
@@ -62,6 +70,9 @@
             const wifiSelect = document.getElementById('wifi-select');
             const wifiPasswordInput = document.getElementById('wifi-password');
             const networkStatus = document.getElementById('network-status');
+
+            // Set default meeting date to today
+            meetingDateInput.valueAsDate = new Date();
 
             // --- Transcript Management ---
 
@@ -74,55 +85,136 @@
                 try {
                     const response = await fetch('/api/transcripts');
                     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                    const files = await response.json();
+                    const meetings = await response.json();
 
                     loadingMsg.classList.add('hidden');
 
-                    if (files.length === 0) {
-                        transcriptsList.innerHTML = '<p class="text-gray-500">No transcripts found.</p>';
+                    if (meetings.length === 0) {
+                        transcriptsList.innerHTML = '<p class="text-gray-500">No meetings found.</p>';
                         return;
                     }
 
-                    files.forEach(file => {
-                        const fileEl = document.createElement('div');
-                        fileEl.className = 'flex items-center justify-between bg-gray-50 p-3 rounded-md border';
-                        fileEl.innerHTML = `
-                            <span class="text-gray-800 font-mono">${file}</span>
-                            <div class="space-x-2">
-                                <a href="/api/transcripts/${file}" download class="text-blue-600 hover:underline">Download</a>
-                                <button data-filename="${file}" class="delete-btn text-red-600 hover:underline">Delete</button>
+                    meetings.forEach(meeting => {
+                        const meetingEl = document.createElement('div');
+                        meetingEl.className = 'bg-gray-50 p-4 rounded-md border';
+                        meetingEl.dataset.id = meeting.id;
+                        meetingEl.dataset.name = meeting.name;
+                        meetingEl.dataset.date = meeting.date;
+
+                        const pdfFilename = `${meeting.audio_filename.split('.').slice(0, -1).join('.')}.pdf`;
+                        const downloadLink = meeting.pdf_exists 
+                            ? `<a href="/api/transcripts/${meeting.id}/${pdfFilename}" download class="text-blue-600 hover:underline">Download PDF</a>`
+                            : `<span class="text-gray-400">PDF Processing...</span>`;
+
+                        meetingEl.innerHTML = `
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <h3 class="text-lg font-semibold text-gray-800">${meeting.name}</h3>
+                                    <p class="text-sm text-gray-500">${meeting.date}</p>
+                                </div>
+                                <div class="space-x-3">
+                                    ${downloadLink}
+                                    <button class="edit-btn text-gray-600 hover:underline">Edit</button>
+                                    <button class="delete-btn text-red-600 hover:underline">Delete</button>
+                                </div>
+                            </div>
+                            <div class="edit-form hidden mt-4 space-y-3">
+                                <input type="text" value="${meeting.name}" class="p-2 border rounded w-full edit-name">
+                                <input type="date" value="${meeting.date}" class="p-2 border rounded w-full edit-date">
+                                <div class="attachments-section mt-2">
+                                    <h4 class="font-semibold text-gray-600">Attachments</h4>
+                                    <ul class="list-disc list-inside attachments-list"></ul>
+                                    <input type="file" class="attachment-upload mt-2">
+                                </div>
+                                <div class="text-right space-x-2">
+                                    <button class="save-btn bg-green-500 text-white px-3 py-1 rounded">Save</button>
+                                    <button class="cancel-btn bg-gray-300 px-3 py-1 rounded">Cancel</button>
+                                </div>
                             </div>
                         `;
-                        transcriptsList.appendChild(fileEl);
+                        transcriptsList.appendChild(meetingEl);
                     });
                 } catch (error) {
                     console.error('Error fetching transcripts:', error);
-                    loadingMsg.textContent = 'Failed to load transcripts. Please try again.';
+                    loadingMsg.textContent = 'Failed to load meetings. Please try again.';
                     loadingMsg.classList.remove('hidden');
                 }
             };
 
-            const deleteTranscript = async (filename) => {
-                if (!confirm(`Are you sure you want to delete ${filename}?`)) return;
+            const deleteMeeting = async (meetingId, meetingName) => {
+                if (!confirm(`Are you sure you want to delete "${meetingName}"? This cannot be undone.`)) return;
 
                 try {
-                    const response = await fetch(`/api/transcripts/${filename}`, { method: 'DELETE' });
+                    const response = await fetch(`/api/transcripts/${meetingId}`, { method: 'DELETE' });
                     const result = await response.json();
-
                     if (!response.ok) throw new Error(result.error || 'Failed to delete file.');
-
-                    console.log(result.success);
                     fetchTranscripts(); // Refresh the list
                 } catch (error) {
                     console.error('Error deleting file:', error);
                     alert(`Error: ${error.message}`);
                 }
             };
+            
+            const saveMeeting = async (meetingId, name, date) => {
+                const response = await fetch(`/api/transcripts/${meetingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, date }),
+                });
+                if (response.ok) fetchTranscripts();
+            };
+
+            const fetchAttachments = async (meetingId, listElement) => {
+                const response = await fetch(`/api/transcripts/${meetingId}/attachments`);
+                const files = await response.json();
+                listElement.innerHTML = '';
+                if (files.length === 0) {
+                    listElement.innerHTML = '<li class="text-gray-400">No attachments</li>';
+                }
+                files.forEach(file => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `${file} <button data-filename="${file}" class="delete-attachment-btn text-red-500 text-xs ml-2">x</button>`;
+                    listElement.appendChild(li);
+                });
+            };
 
             transcriptsList.addEventListener('click', (e) => {
+                const meetingEl = e.target.closest('[data-id]');
+                if (!meetingEl) return;
+
+                const meetingId = meetingEl.dataset.id;
+                const meetingName = meetingEl.dataset.name;
+                const editForm = meetingEl.querySelector('.edit-form');
+
                 if (e.target.classList.contains('delete-btn')) {
+                    deleteMeeting(meetingId, meetingName);
+                } else if (e.target.classList.contains('edit-btn')) {
+                    editForm.classList.toggle('hidden');
+                    if (!editForm.classList.contains('hidden')) {
+                        fetchAttachments(meetingId, editForm.querySelector('.attachments-list'));
+                    }
+                } else if (e.target.classList.contains('cancel-btn')) {
+                    editForm.classList.add('hidden');
+                } else if (e.target.classList.contains('save-btn')) {
+                    const newName = meetingEl.querySelector('.edit-name').value;
+                    const newDate = meetingEl.querySelector('.edit-date').value;
+                    saveMeeting(meetingId, newName, newDate);
+                } else if (e.target.classList.contains('delete-attachment-btn')) {
                     const filename = e.target.dataset.filename;
-                    deleteTranscript(filename);
+                    fetch(`/api/transcripts/${meetingId}/attachments/${filename}`, { method: 'DELETE' })
+                        .then(() => fetchAttachments(meetingId, meetingEl.querySelector('.attachments-list')));
+                }
+            });
+
+            transcriptsList.addEventListener('change', e => {
+                if (e.target.classList.contains('attachment-upload')) {
+                    const meetingId = e.target.closest('[data-id]').dataset.id;
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    fetch(`/api/transcripts/${meetingId}/attachments`, { method: 'POST', body: formData })
+                        .then(() => fetchAttachments(meetingId, e.target.closest('.edit-form').querySelector('.attachments-list')));
                 }
             });
 
@@ -131,15 +223,13 @@
             // --- File Upload ---
 
             const uploadFile = async (file) => {
-                const allowedTypes = ['audio/wav', 'audio/x-m4a', 'audio/mp4'];
-                if (!allowedTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.wav') && !file.name.toLowerCase().endsWith('.m4a')) {
-                    uploadStatus.textContent = 'Error: Only .wav or .m4a files are accepted.';
-                    uploadStatus.className = 'mt-4 text-sm text-red-600';
-                    return;
-                }
+                const name = meetingNameInput.value || 'Untitled Meeting';
+                const date = meetingDateInput.value;
 
                 const formData = new FormData();
                 formData.append('file', file);
+                formData.append('name', name);
+                formData.append('date', date);
 
                 uploadStatus.textContent = `Uploading ${file.name}...`;
                 uploadStatus.className = 'mt-4 text-sm text-blue-600';
@@ -156,8 +246,10 @@
                     uploadStatus.textContent = result.success;
                     uploadStatus.className = 'mt-4 text-sm text-green-600';
                     
-                    // Refresh transcript list after a delay to allow for processing
-                    setTimeout(fetchTranscripts, 5000);
+                    // Clear inputs and refresh
+                    meetingNameInput.value = '';
+                    fileInput.value = '';
+                    fetchTranscripts();
 
                 } catch (error) {
                     uploadStatus.textContent = `Error: ${error.message}`;

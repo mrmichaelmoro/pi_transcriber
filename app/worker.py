@@ -104,33 +104,47 @@ def handle_audio_conversion(filepath):
 
     raise TypeError(f"Unsupported audio format: {extension}")
 
-def process_job(filepath):
-    """The main processing pipeline for a single audio file."""
+def process_job(meeting_id):
+    """The main processing pipeline for a single meeting."""
+    meeting_path = os.path.join(TRANSCRIPTS_DIR, meeting_id)
+    metadata_path = os.path.join(meeting_path, 'metadata.json')
+
+    if not os.path.exists(metadata_path):
+        print(f"Error: metadata.json not found for job {meeting_id}. Skipping.")
+        return
+
+    with open(metadata_path, 'r') as f:
+        metadata = json.load(f)
+
+    audio_filename = metadata.get('audio_filename')
+    if not audio_filename:
+        print(f"Error: audio_filename not in metadata for job {meeting_id}. Skipping.")
+        return
+
+    audio_filepath = os.path.join(meeting_path, audio_filename)
+    if not os.path.exists(audio_filepath):
+        print(f"Error: Audio file {audio_filename} not found for job {meeting_id}. Skipping.")
+        return
+
+    print(f"Processing job for meeting: {metadata.get('name', meeting_id)}")
     try:
-        print(f"Processing job: {os.path.basename(filepath)}")
-        
-        # 1. Transcribe
-        transcript = transcribe_audio(filepath)
-        # Convert audio if necessary. The original file is replaced by the .wav
-        wav_filepath = handle_audio_conversion(filepath)
+        # 1. Convert audio if necessary and Transcribe
+        wav_filepath = handle_audio_conversion(audio_filepath)
         transcript = transcribe_audio(wav_filepath)
+        
         if not transcript:
             print("Transcription returned no text. Aborting job.")
             return
 
-        # 2. Analyze
+        # 2. Analyze text
         analysis = analyze_text(transcript)
 
         # 3. Generate PDF
-        pdf_filename = os.path.basename(wav_filepath).replace(".wav", ".pdf")
-        pdf_path = os.path.join(TRANSCRIPTS_DIR, pdf_filename)
+        pdf_filename = os.path.splitext(audio_filename)[0] + ".pdf"
+        pdf_path = os.path.join(meeting_path, pdf_filename)
         create_pdf(transcript, analysis, pdf_path)
-
-    finally:
-        # 5. Delete original .wav file
-        if os.path.exists(wav_filepath):
-            os.remove(wav_filepath)
-        print(f"Deleted job file: {os.path.basename(filepath)}")
+    except Exception as e:
+        print(f"!!! An error occurred while processing job {meeting_id}: {e}")
 
 if __name__ == "__main__":
     os.makedirs(JOB_QUEUE_DIR, exist_ok=True)
@@ -138,9 +152,12 @@ if __name__ == "__main__":
     
     print("Worker started. Monitoring job queue...")
     while True:
-        jobs = sorted([f for f in os.listdir(JOB_QUEUE_DIR) if f.lower().endswith((".wav", ".m4a", ".mp3", ".ogg"))])
+        jobs = sorted([f for f in os.listdir(JOB_QUEUE_DIR) if f.endswith(".job")])
         if jobs:
-            job_file = os.path.join(JOB_QUEUE_DIR, jobs[0])
-            process_job(job_file)
+            job_filename = jobs[0]
+            job_path = os.path.join(JOB_QUEUE_DIR, job_filename)
+            meeting_id = job_filename.replace(".job", "")
+            process_job(meeting_id)
+            os.remove(job_path) # Remove job file after processing
         else:
             time.sleep(POLL_INTERVAL)

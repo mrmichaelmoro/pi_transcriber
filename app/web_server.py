@@ -1,5 +1,6 @@
 import os
 import uuid
+import json
 import re
 import subprocess
 from flask import Flask, jsonify, request, send_from_directory, abort
@@ -22,32 +23,74 @@ WPA_SUPPLICANT_CONF = "/etc/wpa_supplicant/wpa_supplicant.conf"
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def get_meeting_path(meeting_id):
+    """Constructs the path to a meeting directory."""
+    return os.path.join(TRANSCRIPTS_DIR, meeting_id)
+
 @app.route('/api/transcripts', methods=['GET'])
 def list_transcripts():
-    """Returns a list of available PDF transcripts."""
+    """Returns a list of all meetings with their metadata."""
     try:
-        files = [f for f in os.listdir(TRANSCRIPTS_DIR) if f.endswith('.pdf')]
-        files.sort(key=lambda name: os.path.getmtime(os.path.join(TRANSCRIPTS_DIR, name)), reverse=True)
-        return jsonify(files)
+        meetings = []
+        for meeting_id in os.listdir(TRANSCRIPTS_DIR):
+            meeting_path = get_meeting_path(meeting_id)
+            if os.path.isdir(meeting_path):
+                metadata_path = os.path.join(meeting_path, 'metadata.json')
+                if os.path.exists(metadata_path):
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                        metadata['id'] = meeting_id
+                        # Check for PDF existence
+                        pdf_filename = f"{metadata.get('audio_basename', 'transcript')}.pdf"
+                        metadata['pdf_exists'] = os.path.exists(os.path.join(meeting_path, pdf_filename))
+                        meetings.append(metadata)
+        
+        # Sort by date, descending
+        meetings.sort(key=lambda m: m.get('date', '1970-01-01'), reverse=True)
+        return jsonify(meetings)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/transcripts/<path:filename>', methods=['GET'])
-def download_transcript(filename):
+@app.route('/api/transcripts/<meeting_id>', methods=['PUT'])
+def update_transcript_metadata(meeting_id):
+    """Updates the metadata for a specific meeting."""
+    data = request.get_json()
+    meeting_path = get_meeting_path(meeting_id)
+    metadata_path = os.path.join(meeting_path, 'metadata.json')
+
+    if not os.path.exists(metadata_path):
+        return jsonify({"error": "Meeting not found."}), 404
+
+    try:
+        with open(metadata_path, 'r+') as f:
+            metadata = json.load(f)
+            metadata['name'] = data.get('name', metadata['name'])
+            metadata['date'] = data.get('date', metadata['date'])
+            f.seek(0)
+            json.dump(metadata, f, indent=2)
+            f.truncate()
+        return jsonify({"success": "Metadata updated."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/transcripts/<meeting_id>/<filename>', methods=['GET'])
+def download_transcript(meeting_id, filename):
     """Serves a specific transcript file for download."""
     try:
-        return send_from_directory(TRANSCRIPTS_DIR, filename, as_attachment=True)
+        meeting_path = get_meeting_path(meeting_id)
+        return send_from_directory(meeting_path, filename, as_attachment=True)
     except FileNotFoundError:
         abort(404)
 
-@app.route('/api/transcripts/<path:filename>', methods=['DELETE'])
-def delete_transcript(filename):
-    """Deletes a specific transcript file."""
+@app.route('/api/transcripts/<meeting_id>', methods=['DELETE'])
+def delete_transcript(meeting_id):
+    """Deletes an entire meeting directory."""
     try:
-        filepath = os.path.join(TRANSCRIPTS_DIR, filename)
-        if os.path.exists(filepath):
-            os.remove(filepath)
-            return jsonify({"success": f"File '{filename}' deleted."}), 200
+        meeting_path = get_meeting_path(meeting_id)
+        if os.path.isdir(meeting_path):
+            import shutil
+            shutil.rmtree(meeting_path)
+            return jsonify({"success": f"Meeting '{meeting_id}' deleted."}), 200
         else:
             return jsonify({"error": "File not found."}), 404
     except Exception as e:
@@ -55,19 +98,43 @@ def delete_transcript(filename):
 
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
-    """Handles audio file uploads and places them in the job queue."""
+    """Handles audio file uploads, creates a meeting structure, and queues it."""
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
     file = request.files['file']
+    
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
+        
     if file and allowed_file(file.filename):
-        # Create a unique filename to avoid conflicts
-        original_filename = secure_filename(file.filename)
-        unique_filename = f"upload_{uuid.uuid4().hex[:8]}_{original_filename}"
-        filepath = os.path.join(JOB_QUEUE_DIR, unique_filename)
-        file.save(filepath)
-        return jsonify({"success": f"File '{original_filename}' uploaded and queued for processing."}), 201
+        meeting_name = request.form.get('name', 'Untitled Meeting')
+        meeting_date = request.form.get('date', '1970-01-01')
+
+        # 1. Create a new meeting structure
+        meeting_id = f"{uuid.uuid4().hex}"
+        meeting_path = get_meeting_path(meeting_id)
+        os.makedirs(os.path.join(meeting_path, 'attachments'), exist_ok=True)
+
+        # 2. Save the audio file
+        audio_basename = secure_filename(file.filename)
+        audio_path = os.path.join(meeting_path, audio_basename)
+        file.save(audio_path)
+
+        # 3. Create metadata.json
+        metadata = {
+            "name": meeting_name,
+            "date": meeting_date,
+            "audio_filename": audio_basename
+        }
+        with open(os.path.join(meeting_path, 'metadata.json'), 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        # 4. Create a job file in the queue
+        with open(os.path.join(JOB_QUEUE_DIR, f"{meeting_id}.job"), 'w') as f:
+            f.write(meeting_id)
+
+        return jsonify({"success": f"Meeting '{meeting_name}' created and queued for processing."}), 201
+
     return jsonify({"error": "File type not allowed. Please upload a .wav or .m4a file."}), 400
 
 # --- Wi-Fi Management API ---
@@ -144,6 +211,42 @@ def wifi_connect():
     except Exception as e:
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
+# --- Attachment Management API ---
+
+@app.route('/api/transcripts/<meeting_id>/attachments', methods=['GET'])
+def get_attachments(meeting_id):
+    """Lists attachments for a specific meeting."""
+    attachments_path = os.path.join(get_meeting_path(meeting_id), 'attachments')
+    if not os.path.isdir(attachments_path):
+        return jsonify({"error": "Meeting not found or has no attachments folder."}), 404
+    files = os.listdir(attachments_path)
+    return jsonify(files)
+
+@app.route('/api/transcripts/<meeting_id>/attachments', methods=['POST'])
+def add_attachment(meeting_id):
+    """Uploads an attachment to a specific meeting."""
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    attachments_path = os.path.join(get_meeting_path(meeting_id), 'attachments')
+    if not os.path.isdir(attachments_path):
+        return jsonify({"error": "Meeting not found."}), 404
+
+    filename = secure_filename(file.filename)
+    file.save(os.path.join(attachments_path, filename))
+    return jsonify({"success": f"Attachment '{filename}' uploaded."}), 201
+
+@app.route('/api/transcripts/<meeting_id>/attachments/<filename>', methods=['DELETE'])
+def delete_attachment(meeting_id, filename):
+    """Deletes a specific attachment."""
+    filepath = os.path.join(get_meeting_path(meeting_id), 'attachments', secure_filename(filename))
+    if os.path.exists(filepath):
+        os.remove(filepath)
+        return jsonify({"success": "Attachment deleted."})
+    return jsonify({"error": "Attachment not found."}), 404
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
