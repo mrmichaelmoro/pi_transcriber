@@ -5,6 +5,7 @@ from vosk import Model, KaldiRecognizer
 from ctransformers import AutoModelForCausalLM
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from pydub import AudioSegment
 from reportlab.lib.styles import getSampleStyleSheet
 import wave
 
@@ -86,6 +87,23 @@ def create_pdf(transcript, analysis, output_path):
     doc.build(story)
     print(f"PDF generated at {output_path}")
 
+def handle_audio_conversion(filepath):
+    """Converts non-WAV files to the required WAV format."""
+    filename, extension = os.path.splitext(filepath)
+    if extension.lower() == ".wav":
+        return filepath # No conversion needed
+
+    if extension.lower() in [".m4a", ".mp3", ".ogg"]:
+        print(f"Converting {os.path.basename(filepath)} to WAV...")
+        sound = AudioSegment.from_file(filepath)
+        wav_path = filename + ".wav"
+        # Export as 16-bit PCM mono WAV
+        sound.set_channels(1).set_frame_rate(16000).export(wav_path, format="wav", parameters=["-ac", "1", "-ar", "16000"])
+        os.remove(filepath) # Remove original non-wav file
+        return wav_path
+
+    raise TypeError(f"Unsupported audio format: {extension}")
+
 def process_job(filepath):
     """The main processing pipeline for a single audio file."""
     try:
@@ -93,6 +111,9 @@ def process_job(filepath):
         
         # 1. Transcribe
         transcript = transcribe_audio(filepath)
+        # Convert audio if necessary. The original file is replaced by the .wav
+        wav_filepath = handle_audio_conversion(filepath)
+        transcript = transcribe_audio(wav_filepath)
         if not transcript:
             print("Transcription returned no text. Aborting job.")
             return
@@ -101,13 +122,14 @@ def process_job(filepath):
         analysis = analyze_text(transcript)
 
         # 3. Generate PDF
-        pdf_filename = os.path.basename(filepath).replace(".wav", ".pdf")
+        pdf_filename = os.path.basename(wav_filepath).replace(".wav", ".pdf")
         pdf_path = os.path.join(TRANSCRIPTS_DIR, pdf_filename)
         create_pdf(transcript, analysis, pdf_path)
 
     finally:
         # 5. Delete original .wav file
-        os.remove(filepath)
+        if os.path.exists(wav_filepath):
+            os.remove(wav_filepath)
         print(f"Deleted job file: {os.path.basename(filepath)}")
 
 if __name__ == "__main__":
@@ -116,7 +138,7 @@ if __name__ == "__main__":
     
     print("Worker started. Monitoring job queue...")
     while True:
-        jobs = [f for f in os.listdir(JOB_QUEUE_DIR) if f.endswith(".wav")]
+        jobs = sorted([f for f in os.listdir(JOB_QUEUE_DIR) if f.lower().endswith((".wav", ".m4a", ".mp3", ".ogg"))])
         if jobs:
             job_file = os.path.join(JOB_QUEUE_DIR, jobs[0])
             process_job(job_file)
