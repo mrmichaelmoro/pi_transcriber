@@ -107,27 +107,9 @@ echo ">>> Step 4: Complete."
 
 # --- 5. Install Python Libraries ---
 echo ">>> Step 5: Installing Python libraries..."
-# Run pip as the service user in their home directory to ensure correct permissions
-sudo -u "${SERVICE_USER}" -H pip3 install -r "${APP_DIR}/app/requirements.txt"
+# Install Python packages system-wide for all users and services to access.
+sudo pip3 install -r "${APP_DIR}/app/requirements.txt"
 echo ">>> Step 5: Complete."
-
-# --- 5a. Find User Library Paths ---
-# This is a workaround for systemd services not finding user-installed shared libraries.
-echo ">>> Step 5a: Locating user-installed library paths for services..."
-USER_SITE_PACKAGES=$(sudo -u "${SERVICE_USER}" -H python3 -m site --user-site)
-USER_BASE_DIR=$(sudo -u "${SERVICE_USER}" -H python3 -m site --user-base)
-USER_BASE_LIB="${USER_BASE_DIR}/lib"
-
-CANDIDATE_PATHS=""
-if [ -d "${USER_SITE_PACKAGES}" ]; then
-    CANDIDATE_PATHS="${USER_SITE_PACKAGES}"
-fi
-if [ -d "${USER_BASE_LIB}" ]; then
-    CANDIDATE_PATHS="${CANDIDATE_PATHS}:${USER_BASE_LIB}"
-fi
-if [ -n "${CANDIDATE_PATHS}" ]; then
-    echo "Found potential library paths: ${CANDIDATE_PATHS}"
-fi
 
 # --- 6. Configure Nginx ---
 echo ">>> Step 6: Configuring Nginx..."
@@ -160,10 +142,6 @@ create_service_file() {
     if [ ! -z "$5" ]; then
         WORKING_DIR_LINE="WorkingDirectory=$5"
     fi
-    ENV_LINE=""
-    if [ ! -z "$6" ]; then
-        ENV_LINE="Environment=\"$6\""
-    fi
 
     echo "Creating ${SERVICE_FILE_PATH}..."
     sudo bash -c "cat > ${SERVICE_FILE_PATH}" <<EOF
@@ -177,16 +155,15 @@ ExecStart=${EXEC_START}
 Restart=on-failure
 User=${SERVICE_USER}
 ${WORKING_DIR_LINE}
-${ENV_LINE}
 
 [Install]
 WantedBy=multi-user.target
 EOF
 }
 
-create_service_file "/etc/systemd/system/transcriber-hw.service" "Transcriber Hardware Service" "/usr/bin/python3 ${APP_DIR}/app/transcriber.py" "multi-user.target" "" "LD_LIBRARY_PATH=${CANDIDATE_PATHS}"
-create_service_file "/etc/systemd/system/transcriber-worker.service" "Transcriber Worker Service" "/usr/bin/python3 ${APP_DIR}/app/worker.py" "multi-user.target" "" "LD_LIBRARY_PATH=${CANDIDATE_PATHS}"
-create_service_file "/etc/systemd/system/transcriber-web.service" "Transcriber Web Service (Flask)" "/usr/bin/python3 ${APP_DIR}/app/web_server.py" "network.target" "${APP_DIR}/app" "LD_LIBRARY_PATH=${CANDIDATE_PATHS}"
+create_service_file "/etc/systemd/system/transcriber-hw.service" "Transcriber Hardware Service" "/usr/bin/python3 ${APP_DIR}/app/transcriber.py" "multi-user.target"
+create_service_file "/etc/systemd/system/transcriber-worker.service" "Transcriber Worker Service" "/usr/bin/python3 ${APP_DIR}/app/worker.py" "multi-user.target"
+create_service_file "/etc/systemd/system/transcriber-web.service" "Transcriber Web Service (Flask)" "/usr/bin/python3 ${APP_DIR}/app/web_server.py" "network.target" "${APP_DIR}/app"
 
 echo "Reloading systemd, enabling and starting services..."
 sudo systemctl daemon-reload
@@ -230,10 +207,12 @@ if [ ${#AP_PASSWORD} -lt 8 ] || [ ${#AP_PASSWORD} -gt 63 ]; then
     exit 0
 fi
 
-# 1. Configure dhcpcd to set a static IP for wlan0
+# 1. Configure dhcpcd to set a static IP for wlan0 using a drop-in config file
 echo "Configuring static IP for wlan0..."
-sudo bash -c "cat >> /etc/dhcpcd.conf" <<EOF
-
+DHCPCD_CONF_DIR="/etc/dhcpcd.conf.d"
+sudo mkdir -p "${DHCPCD_CONF_DIR}"
+sudo bash -c "cat > ${DHCPCD_CONF_DIR}/wlan0-ap.conf" <<EOF
+# Configuration for Access Point mode on wlan0
 interface wlan0
     static ip_address=${AP_IP}/24
     nohook wpa_supplicant
@@ -243,8 +222,14 @@ EOF
 echo "Configuring dnsmasq..."
 sudo mv /etc/dnsmasq.conf /etc/dnsmasq.conf.orig
 sudo bash -c "cat > /etc/dnsmasq.conf" <<EOF
+# Listen only on the wlan0 interface for DHCP and DNS requests.
 interface=wlan0
+# Do not bind to the wildcard address. This ensures dnsmasq does not listen on any other interfaces.
+bind-interfaces
+# Set the DHCP range for the AP network.
 dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
+# Provide the IP of the Pi as the DNS server for clients.
+server=${AP_IP}
 EOF
 
 # 3. Configure hostapd
