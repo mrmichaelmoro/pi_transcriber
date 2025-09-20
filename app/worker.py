@@ -28,7 +28,13 @@ if not os.path.exists(VOSK_MODEL_PATH):
     raise FileNotFoundError(f"Vosk model not found at {VOSK_MODEL_PATH}")
 vosk_model = Model(VOSK_MODEL_PATH)
 
-llm = AutoModelForCausalLM.from_pretrained(LLAMA_MODEL_PATH, model_type="llama")
+if not os.path.exists(LLAMA_MODEL_PATH):
+    raise FileNotFoundError(f"Llama model not found at {LLAMA_MODEL_PATH}")
+llm = AutoModelForCausalLM.from_pretrained(
+    LLAMA_MODEL_PATH,
+    model_type="llama",
+    gpu_layers=0  # Force CPU-only inference, crucial for RPi
+)
 print("Models loaded successfully.")
 
 def transcribe_audio(filepath):
