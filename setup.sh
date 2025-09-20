@@ -27,6 +27,7 @@ SERVICE_USER="transcribe"
 AP_SSID="TranscriberAP"
 AP_PASSWORD="transcriber" # Must be 8-63 characters
 AP_IP="192.168.4.1"
+WIFI_COUNTRY="US" # Set your 2-letter country code here (e.g., GB, DE, CA)
 
 # Directories
 APP_DIR="/home/${SERVICE_USER}/transcriber-app"
@@ -35,7 +36,7 @@ MODEL_DIR="/opt/models"
 echo "--- Starting Transcription Appliance Setup ---"
 echo "Services will be run by the '${SERVICE_USER}' user."
 
-# --- 1. System Update and Dependency Installation ---
+# --- 1. System Update and Prerequisite Installation ---
 echo ">>> Step 1: Updating system and installing dependencies..."
 sudo apt-get update && sudo apt-get upgrade -y
 sudo apt-get install -y nginx python3-pip python3-pyaudio git unzip ffmpeg git-lfs hostapd dnsmasq
@@ -177,6 +178,15 @@ EOF
 sudo chmod 0440 "${SUDOERS_FILE}"
 echo ">>> Step 8: Complete."
  
+# --- 9. Enable Wi-Fi Radio ---
+echo ">>> Step 9: Enabling Wi-Fi Radio..."
+echo "Setting Wi-Fi Country to ${WIFI_COUNTRY} and unblocking interface."
+# The raspi-config tool is not always present on lite images, install it if needed.
+sudo apt-get install -y raspi-config
+sudo raspi-config nonint do_wifi_country "${WIFI_COUNTRY}"
+sudo rfkill unblock wifi
+echo ">>> Step 9: Complete."
+
 # --- 9. Configure Wi-Fi Access Point ---
 echo ">>> Step 9: Configuring Wi-Fi Access Point..."
 
