@@ -116,13 +116,19 @@ echo ">>> Step 5: Complete."
 echo ">>> Step 5a: Locating ctransformers library for worker service..."
 CTRANSFORMERS_LIB_PATH=""
 LIB_DIR=$(sudo -u "${SERVICE_USER}" -H python3 -c "import os, ctransformers; print(os.path.dirname(ctransformers.__file__))")
+
+# The .so file can be in the package's 'lib' subdir, or in the package dir itself. Check both.
 if [ -d "${LIB_DIR}/lib" ]; then
     CTRANSFORMERS_LIB_PATH="${LIB_DIR}/lib"
-    echo "Found ctransformers library at: ${CTRANSFORMERS_LIB_PATH}"
+elif [ -f "${LIB_DIR}/libctransformers.so" ]; then
+    CTRANSFORMERS_LIB_PATH="${LIB_DIR}"
 else
     echo "!!! WARNING: Could not automatically find ctransformers .so file directory. The worker service may fail."
 fi
 
+if [ -n "${CTRANSFORMERS_LIB_PATH}" ]; then
+    echo "Found ctransformers library path at: ${CTRANSFORMERS_LIB_PATH}"
+fi
 
 # --- 6. Configure Nginx ---
 echo ">>> Step 6: Configuring Nginx..."
