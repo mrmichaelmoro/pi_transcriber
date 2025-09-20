@@ -118,23 +118,32 @@ echo ">>> Step 5a: Registering shared libraries with the system..."
 
 # Helper function to register a library's path with ldconfig
 register_library_path() {
-    PACKAGE_NAME=$1
-    CONF_NAME=$2
+    local PACKAGE_NAME=$1
+    local CONF_NAME=$2
 
     # Use python to find the package's installation directory
-    LIB_DIR=$(python3 -c "import os, ${PACKAGE_NAME}; print(os.path.dirname(${PACKAGE_NAME}.__file__))" 2>/dev/null)
+    local PKG_ROOT_DIR=$(python3 -c "import os, ${PACKAGE_NAME}; print(os.path.dirname(${PACKAGE_NAME}.__file__))" 2>/dev/null)
 
-    if [ -z "${LIB_DIR}" ]; then
+    if [ -z "${PKG_ROOT_DIR}" ]; then
         echo "!!! WARNING: Python package '${PACKAGE_NAME}' not found. Skipping library registration."
         return
     fi
 
-    echo "Found ${PACKAGE_NAME} library directory at ${LIB_DIR}"
-    # Create a conf file to tell the dynamic linker where to find our library
-    echo "${LIB_DIR}" | sudo tee "/etc/ld.so.conf.d/${CONF_NAME}.conf" > /dev/null
+    # Find all unique subdirectories within the package that contain .so files
+    local SO_DIRS=$(find "${PKG_ROOT_DIR}" -type f -name '*.so' -exec dirname {} \; | sort -u)
+
+    if [ -n "${SO_DIRS}" ]; then
+        echo "Found shared library directories for ${PACKAGE_NAME}:"
+        echo "${SO_DIRS}"
+        # Create a conf file to tell the dynamic linker where to find these libraries
+        echo "${SO_DIRS}" | sudo tee "/etc/ld.so.conf.d/${CONF_NAME}.conf" > /dev/null
+    else
+        echo "No .so files found directly in ${PACKAGE_NAME} package. This may be okay."
+    fi
 }
 
 # Register library paths for packages with native .so files
+echo "Searching for native libraries in installed Python packages..."
 register_library_path "ctransformers" "ctransformers"
 register_library_path "vosk" "vosk"
 register_library_path "pyaudio" "pyaudio"
