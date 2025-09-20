@@ -111,6 +111,19 @@ echo ">>> Step 5: Installing Python libraries..."
 sudo -u "${SERVICE_USER}" -H pip3 install -r "${APP_DIR}/app/requirements.txt"
 echo ">>> Step 5: Complete."
 
+# --- 5a. Find CTransformers Library Path ---
+# This is a workaround for systemd services not finding user-installed shared libraries.
+echo ">>> Step 5a: Locating ctransformers library for worker service..."
+CTRANSFORMERS_LIB_PATH=""
+LIB_DIR=$(sudo -u "${SERVICE_USER}" -H python3 -c "import os, ctransformers; print(os.path.dirname(ctransformers.__file__))")
+if [ -d "${LIB_DIR}/lib" ]; then
+    CTRANSFORMERS_LIB_PATH="${LIB_DIR}/lib"
+    echo "Found ctransformers library at: ${CTRANSFORMERS_LIB_PATH}"
+else
+    echo "!!! WARNING: Could not automatically find ctransformers .so file directory. The worker service may fail."
+fi
+
+
 # --- 6. Configure Nginx ---
 echo ">>> Step 6: Configuring Nginx..."
 sudo rm -f /etc/nginx/sites-enabled/default
@@ -142,6 +155,10 @@ create_service_file() {
     if [ ! -z "$5" ]; then
         WORKING_DIR_LINE="WorkingDirectory=$5"
     fi
+    ENV_LINE=""
+    if [ ! -z "$6" ]; then
+        ENV_LINE="Environment=\"$6\""
+    fi
 
     echo "Creating ${SERVICE_FILE_PATH}..."
     sudo bash -c "cat > ${SERVICE_FILE_PATH}" <<EOF
@@ -155,6 +172,7 @@ ExecStart=${EXEC_START}
 Restart=on-failure
 User=${SERVICE_USER}
 ${WORKING_DIR_LINE}
+${ENV_LINE}
 
 [Install]
 WantedBy=multi-user.target
@@ -162,7 +180,7 @@ EOF
 }
 
 create_service_file "/etc/systemd/system/transcriber-hw.service" "Transcriber Hardware Service" "/usr/bin/python3 ${APP_DIR}/app/transcriber.py" "multi-user.target"
-create_service_file "/etc/systemd/system/transcriber-worker.service" "Transcriber Worker Service" "/usr/bin/python3 ${APP_DIR}/app/worker.py" "multi-user.target"
+create_service_file "/etc/systemd/system/transcriber-worker.service" "Transcriber Worker Service" "/usr/bin/python3 ${APP_DIR}/app/worker.py" "multi-user.target" "" "LD_LIBRARY_PATH=${CTRANSFORMERS_LIB_PATH}"
 create_service_file "/etc/systemd/system/transcriber-web.service" "Transcriber Web Service (Flask)" "/usr/bin/python3 ${APP_DIR}/app/web_server.py" "network.target" "${APP_DIR}/app"
 
 echo "Reloading systemd, enabling and starting services..."
