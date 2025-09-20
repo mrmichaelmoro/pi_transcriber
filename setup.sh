@@ -111,16 +111,22 @@ echo ">>> Step 5: Installing Python libraries..."
 sudo -u "${SERVICE_USER}" -H pip3 install -r "${APP_DIR}/app/requirements.txt"
 echo ">>> Step 5: Complete."
 
-# --- 5a. Find User Library Path ---
+# --- 5a. Find User Library Paths ---
 # This is a workaround for systemd services not finding user-installed shared libraries.
-echo ">>> Step 5a: Locating user-installed library path for services..."
-USER_BASE_LIB=""
+echo ">>> Step 5a: Locating user-installed library paths for services..."
+USER_SITE_PACKAGES=$(sudo -u "${SERVICE_USER}" -H python3 -m site --user-site)
 USER_BASE_DIR=$(sudo -u "${SERVICE_USER}" -H python3 -m site --user-base)
-if [ -d "${USER_BASE_DIR}/lib" ]; then
-    USER_BASE_LIB="${USER_BASE_DIR}/lib"
-    echo "Found user library path at: ${USER_BASE_LIB}"
-else
-    echo "!!! WARNING: Could not automatically find user library path. Services may fail."
+USER_BASE_LIB="${USER_BASE_DIR}/lib"
+
+CANDIDATE_PATHS=""
+if [ -d "${USER_SITE_PACKAGES}" ]; then
+    CANDIDATE_PATHS="${USER_SITE_PACKAGES}"
+fi
+if [ -d "${USER_BASE_LIB}" ]; then
+    CANDIDATE_PATHS="${CANDIDATE_PATHS}:${USER_BASE_LIB}"
+fi
+if [ -n "${CANDIDATE_PATHS}" ]; then
+    echo "Found potential library paths: ${CANDIDATE_PATHS}"
 fi
 
 # --- 6. Configure Nginx ---
@@ -178,9 +184,9 @@ WantedBy=multi-user.target
 EOF
 }
 
-create_service_file "/etc/systemd/system/transcriber-hw.service" "Transcriber Hardware Service" "/usr/bin/python3 ${APP_DIR}/app/transcriber.py" "multi-user.target" "" "LD_LIBRARY_PATH=${USER_BASE_LIB}"
-create_service_file "/etc/systemd/system/transcriber-worker.service" "Transcriber Worker Service" "/usr/bin/python3 ${APP_DIR}/app/worker.py" "multi-user.target" "" "LD_LIBRARY_PATH=${USER_BASE_LIB}"
-create_service_file "/etc/systemd/system/transcriber-web.service" "Transcriber Web Service (Flask)" "/usr/bin/python3 ${APP_DIR}/app/web_server.py" "network.target" "${APP_DIR}/app" "LD_LIBRARY_PATH=${USER_BASE_LIB}"
+create_service_file "/etc/systemd/system/transcriber-hw.service" "Transcriber Hardware Service" "/usr/bin/python3 ${APP_DIR}/app/transcriber.py" "multi-user.target" "" "LD_LIBRARY_PATH=${CANDIDATE_PATHS}"
+create_service_file "/etc/systemd/system/transcriber-worker.service" "Transcriber Worker Service" "/usr/bin/python3 ${APP_DIR}/app/worker.py" "multi-user.target" "" "LD_LIBRARY_PATH=${CANDIDATE_PATHS}"
+create_service_file "/etc/systemd/system/transcriber-web.service" "Transcriber Web Service (Flask)" "/usr/bin/python3 ${APP_DIR}/app/web_server.py" "network.target" "${APP_DIR}/app" "LD_LIBRARY_PATH=${CANDIDATE_PATHS}"
 
 echo "Reloading systemd, enabling and starting services..."
 sudo systemctl daemon-reload
