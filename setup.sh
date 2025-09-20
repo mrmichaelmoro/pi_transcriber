@@ -15,13 +15,20 @@ set -e # Exit immediately if a command exits with a non-zero status.
 
 # Check if running as root/sudo
 if [ "$EUID" -ne 0 ]; then
-  echo "Please run this script with sudo: sudo ./setup.sh"
+  echo -e "\033[0;31mPlease run this script with sudo: sudo ./setup.sh\033[0m"
   exit 1
 fi
+
+# --- Color Definitions ---
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
 
 # --- Configuration ---
 # The dedicated non-privileged user to run the application services.
 SERVICE_USER="transcribe"
+
 
 # Wi-Fi Access Point Settings
 AP_SSID="TranscriberAP"
@@ -33,17 +40,19 @@ WIFI_COUNTRY="US" # Set your 2-letter country code here (e.g., GB, DE, CA)
 APP_DIR="/home/${SERVICE_USER}/transcriber-app"
 MODEL_DIR="/opt/models"
 
-echo "--- Starting Transcription Appliance Setup ---"
+echo -e "${GREEN}--- Starting Transcription Appliance Setup ---${NC}"
 echo "Services will be run by the '${SERVICE_USER}' user."
+echo
 
 # --- 1. System Update and Prerequisite Installation ---
-echo ">>> Step 1: Updating system and installing dependencies..."
+echo -e "${GREEN}>>> Step 1: Updating system and installing dependencies...${NC}"
 sudo apt-get update && sudo apt-get upgrade -y
 sudo apt-get install -y nginx python3-pip python3-pyaudio git unzip ffmpeg git-lfs hostapd dnsmasq
-echo ">>> Step 1: Complete."
+echo -e "${GREEN}>>> Step 1: Complete.${NC}"
+echo
 
 # --- 2. Download and Set Up AI Models ---
-echo ">>> Step 2: Downloading and setting up AI models..."
+echo -e "${GREEN}>>> Step 2: Downloading and setting up AI models...${NC}"
 sudo mkdir -p "${MODEL_DIR}"
 
 # Run model downloads in a subshell to isolate the 'cd' command
@@ -75,10 +84,11 @@ sudo mkdir -p "${MODEL_DIR}"
 # Set correct permissions for the models directory.
 # The service user needs to read these. Making them world-readable is a safe way to do this.
 sudo chmod -R 755 "${MODEL_DIR}"
-echo ">>> Step 2: Complete."
+echo -e "${GREEN}>>> Step 2: Complete.${NC}"
+echo
 
 # --- 3. Create Service User ---
-echo ">>> Step 3: Creating non-privileged user '${SERVICE_USER}'..."
+echo -e "${GREEN}>>> Step 3: Creating non-privileged user '${SERVICE_USER}'...${NC}"
 if id -u "${SERVICE_USER}" >/dev/null 2>&1; then
     # Ensure a clean state by removing any old local packages if the user exists
     echo "User '${SERVICE_USER}' exists. Removing old local packages to ensure clean environment..."
@@ -88,10 +98,11 @@ else
     sudo useradd -r -s /bin/false -m -d "/home/${SERVICE_USER}" "${SERVICE_USER}"
     echo "User '${SERVICE_USER}' created."
 fi
-echo ">>> Step 3: Complete."
+echo -e "${GREEN}>>> Step 3: Complete.${NC}"
+echo
 
 # --- 4. Copy Application Files ---
-echo ">>> Step 4: Copying application files..."
+echo -e "${GREEN}>>> Step 4: Copying application files...${NC}"
 # Determine the directory where the script is located (the repo root)
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
@@ -105,16 +116,18 @@ sudo usermod -a -G "${SERVICE_USER}" www-data
 sudo chmod 750 "/home/${SERVICE_USER}"
 sudo chmod -R 750 "${APP_DIR}"
 
-echo ">>> Step 4: Complete."
+echo -e "${GREEN}>>> Step 4: Complete.${NC}"
+echo
 
 # --- 5. Install Python Libraries ---
-echo ">>> Step 5: Installing Python libraries..."
+echo -e "${GREEN}>>> Step 5: Installing Python libraries...${NC}"
 # Install Python packages system-wide for all users and services to access.
 sudo pip3 install -r "${APP_DIR}/app/requirements.txt"
-echo ">>> Step 5: Complete."
+echo -e "${GREEN}>>> Step 5: Complete.${NC}"
+echo
 
 # --- 5a. Register Shared Libraries for Native Python Modules ---
-echo ">>> Step 5a: Registering shared libraries with the system..."
+echo -e "${GREEN}>>> Step 5a: Registering shared libraries with the system...${NC}"
 
 # Helper function to register a library's path with ldconfig
 register_library_path() {
@@ -125,7 +138,7 @@ register_library_path() {
     local PKG_ROOT_DIR=$(python3 -c "import os, ${PACKAGE_NAME}; print(os.path.dirname(${PACKAGE_NAME}.__file__))" 2>/dev/null)
 
     if [ -z "${PKG_ROOT_DIR}" ]; then
-        echo "!!! WARNING: Python package '${PACKAGE_NAME}' not found. Skipping library registration."
+        echo -e "${YELLOW}!!! WARNING: Python package '${PACKAGE_NAME}' not found. Skipping library registration.${NC}"
         return
     fi
 
@@ -138,7 +151,7 @@ register_library_path() {
         # Create a conf file to tell the dynamic linker where to find these libraries
         echo "${SO_DIRS}" | sudo tee "/etc/ld.so.conf.d/${CONF_NAME}.conf" > /dev/null
     else
-        echo "No .so files found directly in ${PACKAGE_NAME} package. This may be okay."
+        echo "No .so files found directly in ${PACKAGE_NAME} package. This is likely okay."
     fi
 }
 
@@ -152,10 +165,11 @@ register_library_path "pyaudio" "pyaudio"
 echo "Rebuilding shared library cache..."
 sudo ldconfig
 
-echo ">>> Step 5a: Complete."
+echo -e "${GREEN}>>> Step 5a: Complete.${NC}"
+echo
 
 # --- 6. Configure Nginx ---
-echo ">>> Step 6: Configuring Nginx..."
+echo -e "${GREEN}>>> Step 6: Configuring Nginx...${NC}"
 sudo rm -f /etc/nginx/sites-enabled/default
 
 # Use sed to replace the placeholder root directory with the actual APP_DIR
@@ -170,10 +184,11 @@ fi
 
 sudo nginx -t # Test configuration
 sudo systemctl restart nginx
-echo ">>> Step 6: Complete."
+echo -e "${GREEN}>>> Step 6: Complete.${NC}"
+echo
 
 # --- 7. Create and Enable systemd Services ---
-echo ">>> Step 7: Creating and enabling systemd services..."
+echo -e "${GREEN}>>> Step 7: Creating and enabling systemd services...${NC}"
 
 # Create a helper function to generate service files
 create_service_file() {
@@ -211,15 +226,17 @@ create_service_file "/etc/systemd/system/transcriber-web.service" "Transcriber W
 echo "Reloading systemd and enabling services..."
 sudo systemctl daemon-reload
 sudo systemctl enable transcriber-hw.service transcriber-worker.service transcriber-web.service
-echo ">>> Step 7: Complete."
+echo -e "${GREEN}>>> Step 7: Complete.${NC}"
+echo
 
-echo "--- Setup is complete! ---"
+echo -e "${GREEN}--- Core Setup is complete! ---${NC}"
 echo "You can now access the web interface at http://<your-pi-ip-address>"
 echo "If AP mode was enabled, connect to the '${AP_SSID}' Wi-Fi network."
-echo "You will need to reboot for AP mode to take effect."
+echo -e "${YELLOW}You will need to reboot for AP mode to take effect.${NC}"
+echo
 
 # --- 8. Sudoers for Network Management ---
-echo ">>> Step 8: Granting network permissions to ${SERVICE_USER} for wlan0..."
+echo -e "${GREEN}>>> Step 8: Granting network permissions to ${SERVICE_USER} for wlan0...${NC}"
 SUDOERS_FILE="/etc/sudoers.d/010_${SERVICE_USER}-network"
 sudo bash -c "cat > ${SUDOERS_FILE}" <<EOF
 # Allow the ${SERVICE_USER} user to run specific network commands
@@ -229,23 +246,25 @@ ${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/wpa_cli -i wlan0 status
 ${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/ip addr show wlan0
 EOF
 sudo chmod 0440 "${SUDOERS_FILE}"
-echo ">>> Step 8: Complete."
+echo -e "${GREEN}>>> Step 8: Complete.${NC}"
+echo
  
 # --- 9. Enable Wi-Fi Radio ---
-echo ">>> Step 9: Enabling Wi-Fi Radio..."
+echo -e "${GREEN}>>> Step 9: Enabling Wi-Fi Radio...${NC}"
 echo "Setting Wi-Fi Country to ${WIFI_COUNTRY} and unblocking interface."
 # The raspi-config tool is not always present on lite images, install it if needed.
 sudo apt-get install -y raspi-config
 sudo raspi-config nonint do_wifi_country "${WIFI_COUNTRY}"
 sudo rfkill unblock wifi
-echo ">>> Step 9: Complete."
+echo -e "${GREEN}>>> Step 9: Complete.${NC}"
+echo
 
 # --- 9. Configure Wi-Fi Access Point ---
-echo ">>> Step 9: Configuring Wi-Fi Access Point..."
+echo -e "${GREEN}>>> Step 9: Configuring Wi-Fi Access Point...${NC}"
 
 # Check if password is valid
 if [ ${#AP_PASSWORD} -lt 8 ] || [ ${#AP_PASSWORD} -gt 63 ]; then
-    echo "!!! WARNING: Wi-Fi password is not valid (must be 8-63 characters). Skipping AP setup."
+    echo -e "${YELLOW}!!! WARNING: Wi-Fi password is not valid (must be 8-63 characters). Skipping AP setup.${NC}"
     exit 0
 fi
 
@@ -300,7 +319,8 @@ sudo systemctl enable hostapd
 sudo systemctl enable dnsmasq
 
 # --- 10. Final Restart of Services ---
-echo ">>> Step 10: Restarting all services with final configuration..."
+echo -e "${GREEN}>>> Step 10: Restarting all services with final configuration...${NC}"
 sudo systemctl restart transcriber-hw.service transcriber-worker.service transcriber-web.service nginx
+echo
 
-echo ">>> Step 9: Complete. Please reboot the Raspberry Pi to activate the Access Point."
+echo -e "${GREEN}>>> AP Setup Complete. Please reboot the Raspberry Pi to activate the Access Point.${NC}"
