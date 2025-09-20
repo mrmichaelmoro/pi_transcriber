@@ -111,23 +111,16 @@ echo ">>> Step 5: Installing Python libraries..."
 sudo -u "${SERVICE_USER}" -H pip3 install -r "${APP_DIR}/app/requirements.txt"
 echo ">>> Step 5: Complete."
 
-# --- 5a. Find CTransformers Library Path ---
+# --- 5a. Find User Library Path ---
 # This is a workaround for systemd services not finding user-installed shared libraries.
-echo ">>> Step 5a: Locating ctransformers library for worker service..."
-CTRANSFORMERS_LIB_PATH=""
-LIB_DIR=$(sudo -u "${SERVICE_USER}" -H python3 -c "import os, ctransformers; print(os.path.dirname(ctransformers.__file__))")
-
-# The .so file can be in the package's 'lib' subdir, or in the package dir itself. Check both.
-if [ -d "${LIB_DIR}/lib" ]; then
-    CTRANSFORMERS_LIB_PATH="${LIB_DIR}/lib"
-elif [ -f "${LIB_DIR}/libctransformers.so" ]; then
-    CTRANSFORMERS_LIB_PATH="${LIB_DIR}"
+echo ">>> Step 5a: Locating user-installed library path for services..."
+USER_BASE_LIB=""
+USER_BASE_DIR=$(sudo -u "${SERVICE_USER}" -H python3 -m site --user-base)
+if [ -d "${USER_BASE_DIR}/lib" ]; then
+    USER_BASE_LIB="${USER_BASE_DIR}/lib"
+    echo "Found user library path at: ${USER_BASE_LIB}"
 else
-    echo "!!! WARNING: Could not automatically find ctransformers .so file directory. The worker service may fail."
-fi
-
-if [ -n "${CTRANSFORMERS_LIB_PATH}" ]; then
-    echo "Found ctransformers library path at: ${CTRANSFORMERS_LIB_PATH}"
+    echo "!!! WARNING: Could not automatically find user library path. Services may fail."
 fi
 
 # --- 6. Configure Nginx ---
@@ -185,9 +178,9 @@ WantedBy=multi-user.target
 EOF
 }
 
-create_service_file "/etc/systemd/system/transcriber-hw.service" "Transcriber Hardware Service" "/usr/bin/python3 ${APP_DIR}/app/transcriber.py" "multi-user.target"
-create_service_file "/etc/systemd/system/transcriber-worker.service" "Transcriber Worker Service" "/usr/bin/python3 ${APP_DIR}/app/worker.py" "multi-user.target" "" "LD_LIBRARY_PATH=${CTRANSFORMERS_LIB_PATH}"
-create_service_file "/etc/systemd/system/transcriber-web.service" "Transcriber Web Service (Flask)" "/usr/bin/python3 ${APP_DIR}/app/web_server.py" "network.target" "${APP_DIR}/app"
+create_service_file "/etc/systemd/system/transcriber-hw.service" "Transcriber Hardware Service" "/usr/bin/python3 ${APP_DIR}/app/transcriber.py" "multi-user.target" "" "LD_LIBRARY_PATH=${USER_BASE_LIB}"
+create_service_file "/etc/systemd/system/transcriber-worker.service" "Transcriber Worker Service" "/usr/bin/python3 ${APP_DIR}/app/worker.py" "multi-user.target" "" "LD_LIBRARY_PATH=${USER_BASE_LIB}"
+create_service_file "/etc/systemd/system/transcriber-web.service" "Transcriber Web Service (Flask)" "/usr/bin/python3 ${APP_DIR}/app/web_server.py" "network.target" "${APP_DIR}/app" "LD_LIBRARY_PATH=${USER_BASE_LIB}"
 
 echo "Reloading systemd, enabling and starting services..."
 sudo systemctl daemon-reload
