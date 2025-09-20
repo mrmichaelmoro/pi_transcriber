@@ -14,7 +14,7 @@ PROJECT_ROOT = os.path.dirname(BASE_DIR)
 
 TRANSCRIPTS_DIR = os.path.join(PROJECT_ROOT, "transcripts")
 JOB_QUEUE_DIR = os.path.join(PROJECT_ROOT, "job_queue")
-ALLOWED_EXTENSIONS = {'wav', 'm4a'}
+ALLOWED_EXTENSIONS = {'wav', 'm4a', 'mp3', 'ogg'}
 
 os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
 os.makedirs(JOB_QUEUE_DIR, exist_ok=True)
@@ -135,7 +135,7 @@ def upload_file():
 
         return jsonify({"success": f"Meeting '{meeting_name}' created and queued for processing."}), 201
 
-    return jsonify({"error": "File type not allowed. Please upload a .wav or .m4a file."}), 400
+    return jsonify({"error": f"File type not allowed. Allowed types are: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
 
 # --- Wi-Fi Management API ---
 

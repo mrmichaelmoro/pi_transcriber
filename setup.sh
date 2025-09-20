@@ -96,6 +96,13 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 sudo mkdir -p "${APP_DIR}"
 sudo rsync -a --exclude='.git' --exclude='setup.sh' "${SCRIPT_DIR}/" "${APP_DIR}/"
 sudo chown -R "${SERVICE_USER}:${SERVICE_USER}" "${APP_DIR}"
+
+# --- Grant Web Server Access ---
+echo "Granting Nginx permissions to access web UI files..."
+sudo usermod -a -G "${SERVICE_USER}" www-data
+sudo chmod 750 "/home/${SERVICE_USER}"
+sudo chmod -R 750 "${APP_DIR}"
+
 echo ">>> Step 4: Complete."
 
 # --- 5. Install Python Libraries ---
