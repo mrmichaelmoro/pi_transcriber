@@ -85,6 +85,10 @@ else
     # Create a system user with a home directory but no login shell
     sudo useradd -r -s /bin/false -m -d "/home/${SERVICE_USER}" "${SERVICE_USER}"
     echo "User '${SERVICE_USER}' created."
+else
+    # Ensure a clean state by removing any old local packages if the user exists
+    echo "User '${SERVICE_USER}' exists. Removing old local packages to ensure clean environment..."
+    sudo rm -rf "/home/${SERVICE_USER}/.local"
 fi
 echo ">>> Step 3: Complete."
 
@@ -110,6 +114,24 @@ echo ">>> Step 5: Installing Python libraries..."
 # Install Python packages system-wide for all users and services to access.
 sudo pip3 install -r "${APP_DIR}/app/requirements.txt"
 echo ">>> Step 5: Complete."
+
+# --- 5a. Register Shared Libraries ---
+echo ">>> Step 5a: Registering shared libraries with the system..."
+
+# Find the directory containing the ctransformers .so file
+LIB_DIR=$(python3 -c "import os, ctransformers; print(os.path.dirname(ctransformers.__file__))")
+
+if [ -f "${LIB_DIR}/libctransformers.so" ]; then
+    echo "Found ctransformers library in ${LIB_DIR}"
+    # Create a conf file to tell the dynamic linker where to find our library
+    echo "${LIB_DIR}" | sudo tee /etc/ld.so.conf.d/ctransformers.conf > /dev/null
+    # Rebuild the linker cache
+    sudo ldconfig
+    echo "Shared library cache updated."
+else
+    echo "!!! WARNING: Could not find libctransformers.so. The worker service may fail."
+fi
+echo ">>> Step 5a: Complete."
 
 # --- 6. Configure Nginx ---
 echo ">>> Step 6: Configuring Nginx..."
