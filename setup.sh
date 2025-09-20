@@ -165,21 +165,20 @@ echo "If AP mode was enabled, connect to the '${AP_SSID}' Wi-Fi network."
 echo "You will need to reboot for AP mode to take effect."
 
 # --- 8. Sudoers for Network Management ---
-echo ">>> Step 8: Granting network permissions to ${SERVICE_USER}..."
+echo ">>> Step 8: Granting network permissions to ${SERVICE_USER} for wlan0..."
 SUDOERS_FILE="/etc/sudoers.d/010_${SERVICE_USER}-network"
 sudo bash -c "cat > ${SUDOERS_FILE}" <<EOF
 # Allow the ${SERVICE_USER} user to run specific network commands
-${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/iwlist wlan1 scan
-${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/wpa_cli -i wlan1 reconfigure
-${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/wpa_cli -i wlan1 status
-${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/ip addr show wlan1
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/iwlist wlan0 scan
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/wpa_cli -i wlan0 reconfigure
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/wpa_cli -i wlan0 status
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/ip addr show wlan0
 EOF
 sudo chmod 0440 "${SUDOERS_FILE}"
 echo ">>> Step 8: Complete."
-
-
-# --- 8. Configure Wi-Fi Access Point ---
-echo ">>> Step 8: Configuring Wi-Fi Access Point..."
+ 
+# --- 9. Configure Wi-Fi Access Point ---
+echo ">>> Step 9: Configuring Wi-Fi Access Point..."
 
 # Check if password is valid
 if [ ${#AP_PASSWORD} -lt 8 ] || [ ${#AP_PASSWORD} -gt 63 ]; then
@@ -228,4 +227,4 @@ echo "Enabling AP services..."
 sudo systemctl unmask hostapd
 sudo systemctl enable hostapd
 sudo systemctl enable dnsmasq
-echo ">>> Step 8: Complete. Please reboot the Raspberry Pi to activate the Access Point."
+echo ">>> Step 9: Complete. Please reboot the Raspberry Pi to activate the Access Point."

@@ -4,3 +4,4 @@ RPi.GPIO
 reportlab
 ctransformers
 Flask
+pydub

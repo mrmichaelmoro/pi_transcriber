@@ -141,29 +141,29 @@ def upload_file():
 
 @app.route('/api/wifi/scan', methods=['GET'])
 def wifi_scan():
-    """Scans for Wi-Fi networks on wlan1."""
+    """Scans for Wi-Fi networks on wlan0."""
     try:
         # Use iwlist to scan for networks. Requires sudo permissions.
-        scan_output = subprocess.check_output(['sudo', 'iwlist', 'wlan1', 'scan'], text=True)
+        scan_output = subprocess.check_output(['sudo', 'iwlist', 'wlan0', 'scan'], text=-True)
         ssids = re.findall(r'ESSID:"([^"]+)"', scan_output)
         # Remove duplicates and empty strings
         unique_ssids = sorted(list(set(filter(None, ssids))))
         return jsonify(unique_ssids)
     except subprocess.CalledProcessError as e:
         if "No such device" in e.stderr:
-            return jsonify({"error": "Secondary Wi-Fi adapter (wlan1) not found."}), 500
+            return jsonify({"error": "Wi-Fi adapter (wlan0) not found."}), 500
         if "Network is down" in e.stderr:
-             return jsonify({"error": "Wi-Fi interface wlan1 is down."}), 500
+             return jsonify({"error": "Wi-Fi interface wlan0 is down."}), 500
         return jsonify({"error": f"Failed to scan for networks: {e.stderr}"}), 500
     except FileNotFoundError:
         return jsonify({"error": "iwlist command not found. Is wireless-tools installed?"}), 500
 
 @app.route('/api/wifi/status', methods=['GET'])
 def wifi_status():
-    """Gets the current status of the wlan1 interface."""
+    """Gets the current status of the wlan0 interface."""
     try:
-        status_output = subprocess.check_output(['sudo', 'wpa_cli', '-i', 'wlan1', 'status'], text=True)
-        ip_output = subprocess.check_output(['sudo', 'ip', 'addr', 'show', 'wlan1'], text=True)
+        status_output = subprocess.check_output(['sudo', 'wpa_cli', '-i', 'wlan0', 'status'], text=True)
+        ip_output = subprocess.check_output(['sudo', 'ip', 'addr', 'show', 'wlan0'], text=True)
 
         ssid_match = re.search(r'^ssid=(.*)$', status_output, re.MULTILINE)
         ip_match = re.search(r'inet (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', ip_output)
@@ -177,7 +177,7 @@ def wifi_status():
 
 @app.route('/api/wifi/connect', methods=['POST'])
 def wifi_connect():
-    """Connects wlan1 to a new Wi-Fi network."""
+    """Connects wlan0 to a new Wi-Fi network."""
     data = request.get_json()
     ssid = data.get('ssid')
     password = data.get('password')
@@ -202,7 +202,7 @@ def wifi_connect():
             f.write(conf_content.strip() + "\n\n" + network_block)
 
         # Tell wpa_supplicant to re-read the configuration
-        subprocess.check_call(['sudo', 'wpa_cli', '-i', 'wlan1', 'reconfigure'])
+        subprocess.check_call(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'])
 
         return jsonify({"success": f"Attempting to connect to '{ssid}'. Check status in a few moments."})
 
