@@ -379,3 +379,335 @@
     </script>
 </body>
 </html>
+                    <p id="loading-msg" class="text-gray-500">Loading transcripts...</p>
+                </div>
+            </section>
+        </main>
+
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const transcriptsList = document.getElementById('transcripts-list');
+            const loadingMsg = document.getElementById('loading-msg');
+            const refreshBtn = document.getElementById('refresh-btn');
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+            const meetingNameInput = document.getElementById('meeting-name');
+            const meetingDateInput = document.getElementById('meeting-date');
+            const uploadStatus = document.getElementById('upload-status');
+            const wifiStatusEl = document.getElementById('wifi-status');
+            const scanBtn = document.getElementById('scan-btn');
+            const connectBtn = document.getElementById('connect-btn');
+            const wifiSelect = document.getElementById('wifi-select');
+            const wifiPasswordInput = document.getElementById('wifi-password');
+            const networkStatus = document.getElementById('network-status');
+
+            // Set default meeting date to today
+            meetingDateInput.valueAsDate = new Date();
+
+            // --- Transcript Management ---
+
+            const fetchTranscripts = async () => {
+                loadingMsg.textContent = 'Loading transcripts...';
+                loadingMsg.classList.remove('hidden');
+                transcriptsList.innerHTML = ''; // Clear old list
+                transcriptsList.appendChild(loadingMsg);
+
+                try {
+                    const response = await fetch('/api/transcripts');
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const meetings = await response.json();
+
+                    loadingMsg.classList.add('hidden');
+
+                    if (meetings.length === 0) {
+                        transcriptsList.innerHTML = '<p class="text-gray-500">No meetings found.</p>';
+                        return;
+                    }
+
+                    meetings.forEach(meeting => {
+                        const meetingEl = document.createElement('div');
+                        meetingEl.className = 'bg-gray-50 p-4 rounded-md border';
+                        meetingEl.dataset.id = meeting.id;
+                        meetingEl.dataset.name = meeting.name;
+                        meetingEl.dataset.date = meeting.date;
+
+                        const pdfFilename = `${meeting.audio_filename.split('.').slice(0, -1).join('.')}.pdf`;
+                        const downloadLink = meeting.pdf_exists 
+                            ? `<a href="/api/transcripts/${meeting.id}/${pdfFilename}" download class="text-blue-600 hover:underline">Download PDF</a>`
+                            : `<span class="text-gray-400">PDF Processing...</span>`;
+
+                        meetingEl.innerHTML = `
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <h3 class="text-lg font-semibold text-gray-800">${meeting.name}</h3>
+                                    <p class="text-sm text-gray-500">${meeting.date}</p>
+                                </div>
+                                <div class="space-x-3">
+                                    ${downloadLink}
+                                    <button class="edit-btn text-gray-600 hover:underline">Edit</button>
+                                    <button class="delete-btn text-red-600 hover:underline">Delete</button>
+                                </div>
+                            </div>
+                            <div class="edit-form hidden mt-4 space-y-3">
+                                <input type="text" value="${meeting.name}" class="p-2 border rounded w-full edit-name">
+                                <input type="date" value="${meeting.date}" class="p-2 border rounded w-full edit-date">
+                                <div class="attachments-section mt-2">
+                                    <h4 class="font-semibold text-gray-600">Attachments</h4>
+                                    <ul class="list-disc list-inside attachments-list"></ul>
+                                    <input type="file" class="attachment-upload mt-2">
+                                </div>
+                                <div class="text-right space-x-2">
+                                    <button class="save-btn bg-green-500 text-white px-3 py-1 rounded">Save</button>
+                                    <button class="cancel-btn bg-gray-300 px-3 py-1 rounded">Cancel</button>
+                                </div>
+                            </div>
+                        `;
+                        transcriptsList.appendChild(meetingEl);
+                    });
+                } catch (error) {
+                    console.error('Error fetching transcripts:', error);
+                    loadingMsg.textContent = 'Failed to load meetings. Please try again.';
+                    loadingMsg.classList.remove('hidden');
+                }
+            };
+
+            const deleteMeeting = async (meetingId, meetingName) => {
+                if (!confirm(`Are you sure you want to delete "${meetingName}"? This cannot be undone.`)) return;
+
+                try {
+                    const response = await fetch(`/api/transcripts/${meetingId}`, { method: 'DELETE' });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || 'Failed to delete file.');
+                    fetchTranscripts(); // Refresh the list
+                } catch (error) {
+                    console.error('Error deleting file:', error);
+                    alert(`Error: ${error.message}`);
+                }
+            };
+            
+            const saveMeeting = async (meetingId, name, date) => {
+                const response = await fetch(`/api/transcripts/${meetingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, date }),
+                });
+                if (response.ok) fetchTranscripts();
+            };
+
+            const fetchAttachments = async (meetingId, listElement) => {
+                const response = await fetch(`/api/transcripts/${meetingId}/attachments`);
+                const files = await response.json();
+                listElement.innerHTML = '';
+                if (files.length === 0) {
+                    listElement.innerHTML = '<li class="text-gray-400">No attachments</li>';
+                }
+                files.forEach(file => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `${file} <button data-filename="${file}" class="delete-attachment-btn text-red-500 text-xs ml-2">x</button>`;
+                    listElement.appendChild(li);
+                });
+            };
+
+            transcriptsList.addEventListener('click', (e) => {
+                const meetingEl = e.target.closest('[data-id]');
+                if (!meetingEl) return;
+
+                const meetingId = meetingEl.dataset.id;
+                const meetingName = meetingEl.dataset.name;
+                const editForm = meetingEl.querySelector('.edit-form');
+
+                if (e.target.classList.contains('delete-btn')) {
+                    deleteMeeting(meetingId, meetingName);
+                } else if (e.target.classList.contains('edit-btn')) {
+                    editForm.classList.toggle('hidden');
+                    if (!editForm.classList.contains('hidden')) {
+                        fetchAttachments(meetingId, editForm.querySelector('.attachments-list'));
+                    }
+                } else if (e.target.classList.contains('cancel-btn')) {
+                    editForm.classList.add('hidden');
+                } else if (e.target.classList.contains('save-btn')) {
+                    const newName = meetingEl.querySelector('.edit-name').value;
+                    const newDate = meetingEl.querySelector('.edit-date').value;
+                    saveMeeting(meetingId, newName, newDate);
+                } else if (e.target.classList.contains('delete-attachment-btn')) {
+                    const filename = e.target.dataset.filename;
+                    fetch(`/api/transcripts/${meetingId}/attachments/${filename}`, { method: 'DELETE' })
+                        .then(() => fetchAttachments(meetingId, meetingEl.querySelector('.attachments-list')));
+                }
+            });
+
+            transcriptsList.addEventListener('change', e => {
+                if (e.target.classList.contains('attachment-upload')) {
+                    const meetingId = e.target.closest('[data-id]').dataset.id;
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    fetch(`/api/transcripts/${meetingId}/attachments`, { method: 'POST', body: formData })
+                        .then(() => fetchAttachments(meetingId, e.target.closest('.edit-form').querySelector('.attachments-list')));
+                }
+            });
+
+            refreshBtn.addEventListener('click', fetchTranscripts);
+
+            // --- File Upload ---
+
+            const uploadFile = async (file) => {
+                const name = meetingNameInput.value || 'Untitled Meeting';
+                const date = meetingDateInput.value;
+
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('name', name);
+                formData.append('date', date);
+
+                uploadStatus.textContent = `Uploading ${file.name}...`;
+                uploadStatus.className = 'mt-4 text-sm text-blue-600';
+
+                try {
+                    const response = await fetch('/api/upload', {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const result = await response.json();
+
+                    if (!response.ok) throw new Error(result.error || 'Upload failed');
+
+                    uploadStatus.textContent = result.success;
+                    uploadStatus.className = 'mt-4 text-sm text-green-600';
+                    
+                    // Clear inputs and refresh
+                    meetingNameInput.value = '';
+                    fileInput.value = '';
+                    fetchTranscripts();
+
+                } catch (error) {
+                    uploadStatus.textContent = `Error: ${error.message}`;
+                    uploadStatus.className = 'mt-4 text-sm text-red-600';
+                }
+            };
+
+            dropZone.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files.length > 0) {
+                    uploadFile(fileInput.files[0]);
+                }
+            });
+
+            // Drag and drop events
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }, false);
+            });
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, () => {
+                    dropZone.classList.add('drop-zone-over');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, () => {
+                    dropZone.classList.remove('drop-zone-over');
+                }, false);
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length > 0) {
+                    uploadFile(files[0]);
+                }
+            }, false);
+
+            // --- Network Management ---
+
+            const updateWifiStatus = async () => {
+                wifiStatusEl.textContent = 'Loading...';
+                try {
+                    const response = await fetch('/api/wifi/status');
+                    const data = await response.json();
+                    if (data.ssid === 'Not connected') {
+                        wifiStatusEl.textContent = 'Not connected';
+                    } else {
+                        wifiStatusEl.textContent = `Connected to ${data.ssid} (${data.ip_address})`;
+                    }
+                } catch (error) {
+                    wifiStatusEl.textContent = 'Error fetching status.';
+                }
+            };
+
+            const scanForNetworks = async () => {
+                scanBtn.disabled = true;
+                scanBtn.textContent = 'Scanning...';
+                wifiSelect.innerHTML = '<option>Scanning...</option>';
+                networkStatus.textContent = '';
+
+                try {
+                    const response = await fetch('/api/wifi/scan');
+                    const data = await response.json();
+
+                    if (!response.ok) throw new Error(data.error || 'Scan failed');
+
+                    wifiSelect.innerHTML = '<option value="">-- Select a Network --</option>';
+                    data.forEach(ssid => {
+                        const option = document.createElement('option');
+                        option.value = ssid;
+                        option.textContent = ssid;
+                        wifiSelect.appendChild(option);
+                    });
+                } catch (error) {
+                    wifiSelect.innerHTML = '<option>Scan failed</option>';
+                    networkStatus.textContent = `Error: ${error.message}`;
+                    networkStatus.className = 'mt-4 text-sm text-red-600';
+                } finally {
+                    scanBtn.disabled = false;
+                    scanBtn.textContent = 'Scan';
+                }
+            };
+
+            const connectToNetwork = async () => {
+                const ssid = wifiSelect.value;
+                const password = wifiPasswordInput.value;
+
+                if (!ssid) {
+                    networkStatus.textContent = 'Please select a network.';
+                    networkStatus.className = 'mt-4 text-sm text-red-600';
+                    return;
+                }
+                if (!password) {
+                    networkStatus.textContent = 'Please enter a password.';
+                    networkStatus.className = 'mt-4 text-sm text-red-600';
+                    return;
+                }
+
+                connectBtn.disabled = true;
+                connectBtn.textContent = 'Connecting...';
+                networkStatus.textContent = `Attempting to connect to ${ssid}...`;
+                networkStatus.className = 'mt-4 text-sm text-blue-600';
+
+                const response = await fetch('/api/wifi/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid, password }),
+                });
+
+                connectBtn.disabled = false;
+                connectBtn.textContent = 'Connect';
+                setTimeout(updateWifiStatus, 5000); // Check status after a delay
+            };
+
+            scanBtn.addEventListener('click', scanForNetworks);
+            connectBtn.addEventListener('click', connectToNetwork);
+
+            // Initial load
+            fetchTranscripts();
+            updateWifiStatus();
+        });
+    </script>
+</body>
+</html>
