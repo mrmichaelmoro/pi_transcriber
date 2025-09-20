@@ -158,7 +158,9 @@ if __name__ == "__main__":
     
     print("Worker started. Monitoring job queue...")
     while True:
-        jobs = sorted([f for f in os.listdir(JOB_QUEUE_DIR) if f.endswith(".job")])
+        queue_files = os.listdir(JOB_QUEUE_DIR)
+        jobs = sorted([f for f in queue_files if f.endswith(".job")])
+        
         if jobs:
             job_filename = jobs[0]
             job_path = os.path.join(JOB_QUEUE_DIR, job_filename)
@@ -166,4 +168,10 @@ if __name__ == "__main__":
             process_job(meeting_id)
             os.remove(job_path) # Remove job file after processing
         else:
+            # Cleanup: If there are non-job files, they are from the old transcriber.py. Remove them.
+            for invalid_file in queue_files:
+                invalid_path = os.path.join(JOB_QUEUE_DIR, invalid_file)
+                print(f"Removing invalid file from job queue: {invalid_file}")
+                os.remove(invalid_path)
+
             time.sleep(POLL_INTERVAL)

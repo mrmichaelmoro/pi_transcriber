@@ -4,11 +4,14 @@ import wave
 import time
 import os
 import uuid
+import json
 from datetime import datetime
 
 # --- Configuration ---
 SWITCH_PIN = 23
 LED_PIN = 24
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 JOB_QUEUE_DIR = os.path.join(os.path.dirname(BASE_DIR), "job_queue")
@@ -56,20 +59,38 @@ def record_audio():
     stream.close()
     audio.terminate()
 
-    # Save the recorded data as a WAV file
-    if not os.path.exists(JOB_QUEUE_DIR):
-        os.makedirs(JOB_QUEUE_DIR)
-        
-    filename = f"rec_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.wav"
-    filepath = os.path.join(JOB_QUEUE_DIR, filename)
-    
-    with wave.open(filepath, 'wb') as wf:
+    # --- Create a proper meeting structure, same as web upload ---
+    # 1. Create a new meeting structure
+    meeting_id = f"{uuid.uuid4().hex}"
+    transcripts_dir = os.path.join(PROJECT_ROOT, "transcripts")
+    meeting_path = os.path.join(transcripts_dir, meeting_id)
+    os.makedirs(os.path.join(meeting_path, 'attachments'), exist_ok=True)
+
+    # 2. Save the audio file
+    now = datetime.now()
+    audio_basename = f"rec_{now.strftime('%Y%m%d_%H%M%S')}.wav"
+    audio_path = os.path.join(meeting_path, audio_basename)
+    with wave.open(audio_path, 'wb') as wf:
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(audio.get_sample_size(FORMAT))
         wf.setframerate(RATE)
         wf.writeframes(b''.join(frames))
     
-    print(f"Saved recording to {filepath}")
+    # 3. Create metadata.json
+    metadata = {
+        "name": f"Recording from {now.strftime('%Y-%m-%d %H:%M')}",
+        "date": now.strftime('%Y-%m-%d'),
+        "audio_filename": audio_basename
+    }
+    with open(os.path.join(meeting_path, 'metadata.json'), 'w') as f:
+        json.dump(metadata, f, indent=2)
+
+    # 4. Create a job file in the queue
+    os.makedirs(JOB_QUEUE_DIR, exist_ok=True)
+    with open(os.path.join(JOB_QUEUE_DIR, f"{meeting_id}.job"), 'w') as f:
+        f.write(meeting_id)
+
+    print(f"Created job {meeting_id} for recording {audio_basename}")
 
 if __name__ == "__main__":
     print("Hardware listener started. Waiting for switch...")
