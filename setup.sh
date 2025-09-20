@@ -44,29 +44,32 @@ echo ">>> Step 1: Complete."
 # --- 2. Download and Set Up AI Models ---
 echo ">>> Step 2: Downloading and setting up AI models..."
 sudo mkdir -p "${MODEL_DIR}"
-cd "${MODEL_DIR}"
 
-# Download and unzip Vosk model
-if [ ! -d "${MODEL_DIR}/vosk-model" ]; then
-    echo "Downloading Vosk model..."
-    sudo wget -q --show-progress https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
-    sudo unzip -q vosk-model-small-en-us-0.15.zip
-    sudo mv vosk-model-small-en-us-0.15 vosk-model
-    sudo rm vosk-model-small-en-us-0.15.zip
-    echo "Vosk model installed."
-else
-    echo "Vosk model already exists. Skipping download."
-fi
+# Run model downloads in a subshell to isolate the 'cd' command
+(
+    cd "${MODEL_DIR}"
+    # Download and unzip Vosk model
+    if [ ! -d "vosk-model" ]; then
+        echo "Downloading Vosk model..."
+        sudo wget -q --show-progress https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+        sudo unzip -q vosk-model-small-en-us-0.15.zip
+        sudo mv vosk-model-small-en-us-0.15 vosk-model
+        sudo rm vosk-model-small-en-us-0.15.zip
+        echo "Vosk model installed."
+    else
+        echo "Vosk model already exists. Skipping download."
+    fi
 
-# Download TinyLlama model
-LLAMA_MODEL_FILE="tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
-if [ ! -f "${MODEL_DIR}/${LLAMA_MODEL_FILE}" ]; then
-    echo "Downloading TinyLlama model..."
-    sudo wget -q --show-progress -O "${LLAMA_MODEL_FILE}" https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
-    echo "TinyLlama model installed."
-else
-    echo "TinyLlama model already exists. Skipping download."
-fi
+    # Download TinyLlama model
+    LLAMA_MODEL_FILE="tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+    if [ ! -f "${LLAMA_MODEL_FILE}" ]; then
+        echo "Downloading TinyLlama model..."
+        sudo wget -q --show-progress -O "${LLAMA_MODEL_FILE}" https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+        echo "TinyLlama model installed."
+    else
+        echo "TinyLlama model already exists. Skipping download."
+    fi
+)
 
 # Set correct permissions for the models directory.
 # The service user needs to read these. Making them world-readable is a safe way to do this.
