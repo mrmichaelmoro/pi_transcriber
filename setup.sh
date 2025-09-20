@@ -107,11 +107,15 @@ echo ">>> Step 5: Complete."
 # --- 6. Configure Nginx ---
 echo ">>> Step 6: Configuring Nginx..."
 sudo rm -f /etc/nginx/sites-enabled/default
-sudo cp "${APP_DIR}/nginx/nginx.conf" /etc/nginx/sites-available/transcriber
+
+# Use sed to replace the placeholder root directory with the actual APP_DIR
+NGINX_CONF_TARGET="/etc/nginx/sites-available/transcriber"
+sudo sed "s|__APP_DIR__|${APP_DIR}|g" "${APP_DIR}/nginx/nginx.conf" > /tmp/transcriber.nginx
+sudo mv /tmp/transcriber.nginx "${NGINX_CONF_TARGET}"
 
 # Create symlink if it doesn't exist
 if [ ! -L /etc/nginx/sites-enabled/transcriber ]; then
-    sudo ln -s /etc/nginx/sites-available/transcriber /etc/nginx/sites-enabled/
+    sudo ln -s "${NGINX_CONF_TARGET}" /etc/nginx/sites-enabled/
 fi
 
 sudo nginx -t # Test configuration
