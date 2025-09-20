@@ -80,15 +80,13 @@ echo ">>> Step 2: Complete."
 # --- 3. Create Service User ---
 echo ">>> Step 3: Creating non-privileged user '${SERVICE_USER}'..."
 if id -u "${SERVICE_USER}" >/dev/null 2>&1; then
-    echo "User '${SERVICE_USER}' already exists. Skipping creation."
+    # Ensure a clean state by removing any old local packages if the user exists
+    echo "User '${SERVICE_USER}' exists. Removing old local packages to ensure clean environment..."
+    sudo rm -rf "/home/${SERVICE_USER}/.local"
 else
     # Create a system user with a home directory but no login shell
     sudo useradd -r -s /bin/false -m -d "/home/${SERVICE_USER}" "${SERVICE_USER}"
     echo "User '${SERVICE_USER}' created."
-else
-    # Ensure a clean state by removing any old local packages if the user exists
-    echo "User '${SERVICE_USER}' exists. Removing old local packages to ensure clean environment..."
-    sudo rm -rf "/home/${SERVICE_USER}/.local"
 fi
 echo ">>> Step 3: Complete."
 
@@ -115,22 +113,36 @@ echo ">>> Step 5: Installing Python libraries..."
 sudo pip3 install -r "${APP_DIR}/app/requirements.txt"
 echo ">>> Step 5: Complete."
 
-# --- 5a. Register Shared Libraries ---
+# --- 5a. Register Shared Libraries for Native Python Modules ---
 echo ">>> Step 5a: Registering shared libraries with the system..."
 
-# Find the directory containing the ctransformers .so file
-LIB_DIR=$(python3 -c "import os, ctransformers; print(os.path.dirname(ctransformers.__file__))")
+# Helper function to register a library's path with ldconfig
+register_library_path() {
+    PACKAGE_NAME=$1
+    CONF_NAME=$2
 
-if [ -f "${LIB_DIR}/libctransformers.so" ]; then
-    echo "Found ctransformers library in ${LIB_DIR}"
+    # Use python to find the package's installation directory
+    LIB_DIR=$(python3 -c "import os, ${PACKAGE_NAME}; print(os.path.dirname(${PACKAGE_NAME}.__file__))" 2>/dev/null)
+
+    if [ -z "${LIB_DIR}" ]; then
+        echo "!!! WARNING: Python package '${PACKAGE_NAME}' not found. Skipping library registration."
+        return
+    fi
+
+    echo "Found ${PACKAGE_NAME} library directory at ${LIB_DIR}"
     # Create a conf file to tell the dynamic linker where to find our library
-    echo "${LIB_DIR}" | sudo tee /etc/ld.so.conf.d/ctransformers.conf > /dev/null
-    # Rebuild the linker cache
-    sudo ldconfig
-    echo "Shared library cache updated."
-else
-    echo "!!! WARNING: Could not find libctransformers.so. The worker service may fail."
-fi
+    echo "${LIB_DIR}" | sudo tee "/etc/ld.so.conf.d/${CONF_NAME}.conf" > /dev/null
+}
+
+# Register library paths for packages with native .so files
+register_library_path "ctransformers" "ctransformers"
+register_library_path "vosk" "vosk"
+register_library_path "pyaudio" "pyaudio"
+
+# Rebuild the linker cache after all configurations are added
+echo "Rebuilding shared library cache..."
+sudo ldconfig
+
 echo ">>> Step 5a: Complete."
 
 # --- 6. Configure Nginx ---
@@ -187,10 +199,9 @@ create_service_file "/etc/systemd/system/transcriber-hw.service" "Transcriber Ha
 create_service_file "/etc/systemd/system/transcriber-worker.service" "Transcriber Worker Service" "/usr/bin/python3 ${APP_DIR}/app/worker.py" "multi-user.target"
 create_service_file "/etc/systemd/system/transcriber-web.service" "Transcriber Web Service (Flask)" "/usr/bin/python3 ${APP_DIR}/app/web_server.py" "network.target" "${APP_DIR}/app"
 
-echo "Reloading systemd, enabling and starting services..."
+echo "Reloading systemd and enabling services..."
 sudo systemctl daemon-reload
 sudo systemctl enable transcriber-hw.service transcriber-worker.service transcriber-web.service
-sudo systemctl start transcriber-hw.service transcriber-worker.service transcriber-web.service
 echo ">>> Step 7: Complete."
 
 echo "--- Setup is complete! ---"
@@ -278,4 +289,9 @@ echo "Enabling AP services..."
 sudo systemctl unmask hostapd
 sudo systemctl enable hostapd
 sudo systemctl enable dnsmasq
+
+# --- 10. Final Restart of Services ---
+echo ">>> Step 10: Restarting all services with final configuration..."
+sudo systemctl restart transcriber-hw.service transcriber-worker.service transcriber-web.service nginx
+
 echo ">>> Step 9: Complete. Please reboot the Raspberry Pi to activate the Access Point."
